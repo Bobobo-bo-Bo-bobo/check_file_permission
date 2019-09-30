@@ -1,0 +1,252 @@
+#!/usr/bin/env python
+"""Nagios check to check permission and/or type of a file or directory"""
+
+import getopt
+import os.path
+import stat
+import sys
+
+__version = "1.0.0"
+
+SHORT_OPTIONS = "Chm:t:f"
+LONG_OPTIONS = [
+    "critical",
+    "help",
+    "mode=",
+    "type=",
+    "follow-symlink",
+]
+
+# Nagios exit codes
+OK = 0
+WARNING = 1
+CRITICAL = 2
+UNKNOWN = 3
+
+
+def usage():
+    """
+    Show usage information
+    :return: None
+    """
+    print """check_file_permission version %s
+Copyright (C) by Andreas Maus <maus@ypbind.de>
+This program comes with ABSOLUTELY NO WARRANTY.
+
+check_file_permission is distributed under the Terms of the GNU General
+Public License Version 3. (http://www.gnu.org/copyleft/gpl.html)
+
+Usage: check_file_permission [-h|--help] -m <octal>|--mode=<octal> -t <type>|--type=<type> <file> [<file> ...]
+
+    -C                  Report critical instead of warning state if mode/type doesn't match
+    --critical          Default: Report warning state
+    
+    -f                  Follow symbolic link
+    --follow-symlink    Default: False
+    
+    -h      This text
+    --help
+
+    -m <octal>          Expected mode as octal representation,
+    --mode=<octal>      e.g. '1777'
+
+    -t <type>           Expected file type.
+    --type=<type>       Can be one of:
+                          blockdev - block device
+                          chardev  - character device
+                          dir      - directory
+                          file     - regular file
+                          fifo     - named pipe (fifo)
+                          socket   - socket
+                          symlink  - symbolic link (*)
+                        Default: file
+                        (*) Note: There is no check for hard links because _all_ files/directories in the filesystem
+                                  must be read to get their inode number (a hard link and it's target share the same
+                                  inode). 
+
+""" % (__version, )
+
+
+def get_type(path, follow_symbolic_link=True):
+    """
+    Get type of filesystem object
+    :param path: string
+    :param follow_symbolic_link: bool, default: True
+    :return: string, None on error
+    """
+    try:
+        if follow_symbolic_link:
+            st = os.stat(path)
+        else:
+            st = os.lstat(path)
+
+        if stat.S_ISBLK(mode=st.st_mode):
+            return "blockdev"
+        elif stat.S_ISCHR(mode=st.st_mode):
+            return "chardev"
+        elif stat.S_ISLNK(mode=st.st_mode):
+            return "symlink"
+        elif stat.S_ISDIR(mode=st.st_mode):
+            return "dir"
+        elif stat.S_ISSOCK(mode=st.st_mode):
+            return "socket"
+        elif stat.S_ISFIFO(mode=st.st_mode):
+            return "fifo"
+        elif stat.S_ISREG(mode=st.st_mode):
+            return "file"
+    except OSError:
+        return None
+    except IOError:
+        return None
+
+    return "BUG: Unable to get file type"
+
+
+def get_mode(path, follow_symbolic_link=True):
+    """
+    Get type of filesystem object
+    :param path: string
+    :param follow_symbolic_link: bool, default: True
+    :return: int, None on error
+    """
+    try:
+        if follow_symbolic_link:
+            st = os.stat(path)
+        else:
+            st = os.lstat(path)
+
+        return int(oct(st.st_mode)[-4:], 8)
+    except OSError:
+        return None
+    except IOError:
+        return None
+
+
+def parse_state(status):
+    """
+    Parse state dictionary
+    :param status: dict
+    :return: int, string - return code, message
+    """
+
+    _unknown = ", ".join(status["UNKNOWN"])
+    _critical = ", ".join(status["CRITICAL"])
+    _warning = ", ".join(status["WARNING"])
+    _ok = ", ".join(status["OK"])
+
+    if len(status["UNKNOWN"]) > 0:
+        rc = UNKNOWN
+        msg = "UNKNOWN - " + _unknown
+        if _critical != "":
+            msg += ";" + _critical
+        if _warning:
+            msg += ";" + _warning
+        if _ok != "":
+            msg += ";" + _ok
+    elif len(status["CRITICAL"]) > 0:
+        rc = CRITICAL
+        msg = "CRITICAL - " + _critical
+        if _warning:
+            msg += ";" + _warning
+        if _ok != "":
+            msg += ";" + _ok
+    elif len(status["WARNING"]) > 0:
+        rc = WARNING
+        msg = "WARNING - " + _warning
+        if _ok != "":
+            msg += ";" + _ok
+    elif len(status["OK"]):
+        rc = OK
+        msg = "OK - " + _ok
+    else:
+        rc = UNKNOWN
+        msg = "BUG: Unable to parse state dictionary"
+
+    return rc, msg
+
+
+if __name__ == "__main__":
+    expected_mode = None
+    expected_type = None
+    follow_symlink = False
+    report_critical = False
+    state = {
+        "UNKNOWN": [],
+        "CRITICAL": [],
+        "WARNING": [],
+        "OK": [],
+    }
+
+    try:
+        options, trailing = getopt.getopt(sys.argv[1:], shortopts=SHORT_OPTIONS, longopts=LONG_OPTIONS)
+    except getopt.GetoptError:
+        sys.stderr.write("Error: Can't parse command line options\n")
+        sys.exit(UNKNOWN)
+
+    for opt, arg in options:
+        if opt in ("-h", "--help"):
+            usage()
+            sys.exit(OK)
+        elif opt in ("-C", "--critical"):
+            report_critical = True
+        elif opt in ("-m", "--mode"):
+            try:
+                expected_mode = int(arg, 8)
+            except ValueError as vale:
+                sys.stderr.write("Error: Can't convert %s to an octal value: %s\n" % (arg, vale.message))
+                sys.exit(UNKNOWN)
+        elif opt in ("-t", "--type"):
+            if arg.lower().strip() in ("dir", "file", "link"):
+                expected_type = arg.lower().strip()
+            else:
+                sys.stderr.write("Error: Unknown type %s\n\n")
+                usage()
+                sys.exit(UNKNOWN)
+        elif opt in ("-f", "--follow-symlink"):
+            follow_symlink = True
+        else:
+            sys.stderr.write("Error: Unknown command line option %s\n\n" % (opt, ))
+            sys.exit(UNKNOWN)
+
+    if expected_mode is None and expected_type is None:
+        sys.stderr.write("Error: Neither type nor mode are requested\n\n")
+        usage()
+        sys.exit(UNKNOWN)
+
+    if len(trailing) == 0:
+        sys.stderr.write("Error: No files given\n\n")
+        usage()
+        sys.exit(UNKNOWN)
+
+    for f in trailing:
+        if expected_type is not None:
+            _type = get_type(path=f, follow_symbolic_link=follow_symlink)
+            if _type is not None:
+                if _type == expected_type:
+                    state["OK"].append("%s if of type %s" % (f, expected_type))
+                else:
+                    if report_critical:
+                        state["CRITICAL"].append("%s if of type %s instead of %s" % (f, _type, expected_type))
+                    else:
+                        state["WARNING"].append("%s if of type %s instead of %s" % (f, _type, expected_type))
+            else:
+                state["CRITICAL"].append("Unable to type of %s" % (f, ))
+
+        if expected_mode is not None:
+            _mode = get_mode(path=f, follow_symbolic_link=follow_symlink)
+
+            if _mode is not None:
+                if _mode == expected_mode:
+                    state["OK"].append("mode of %s is %s" % (f, oct(_mode)))
+                else:
+                    if report_critical:
+                        state["CRITICAL"].append("mode of %s is %s instead of %s" % (f, oct(_mode), oct(expected_mode)))
+                    else:
+                        state["WARNING"].append("mode of %s is %s instead of %s" % (f, oct(_mode), oct(expected_mode)))
+            else:
+                state["CRITICAL"].append("Unable to mode of %s" % (f, ))
+
+    exit_code, message = parse_state(status=state)
+    print message
+
+    sys.exit(exit_code)
