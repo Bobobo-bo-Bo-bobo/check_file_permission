@@ -196,7 +196,7 @@ if __name__ == "__main__":
                 sys.stderr.write("Error: Can't convert %s to an octal value: %s\n" % (arg, vale.message))
                 sys.exit(UNKNOWN)
         elif opt in ("-t", "--type"):
-            if arg.lower().strip() in ("dir", "file", "link"):
+            if arg.lower().strip() in ("blockdev", "chardev", "dir", "file", "fifo", "socket", "symlink"):
                 expected_type = arg.lower().strip()
             else:
                 sys.stderr.write("Error: Unknown type %s\n\n")
