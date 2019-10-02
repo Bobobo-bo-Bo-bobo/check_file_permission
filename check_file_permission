@@ -230,7 +230,7 @@ if __name__ == "__main__":
                     else:
                         state["WARNING"].append("%s if of type %s instead of %s" % (f, _type, expected_type))
             else:
-                state["CRITICAL"].append("Unable to type of %s" % (f, ))
+                state["CRITICAL"].append("Unable to get type of %s" % (f, ))
 
         if expected_mode is not None:
             _mode = get_mode(path=f, follow_symbolic_link=follow_symlink)
@@ -244,9 +244,10 @@ if __name__ == "__main__":
                     else:
                         state["WARNING"].append("mode of %s is %s instead of %s" % (f, oct(_mode), oct(expected_mode)))
             else:
-                state["CRITICAL"].append("Unable to mode of %s" % (f, ))
+                state["CRITICAL"].append("Unable to get mode of %s" % (f, ))
 
     exit_code, message = parse_state(status=state)
     print message
 
     sys.exit(exit_code)
+
